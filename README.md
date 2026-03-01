@@ -21,7 +21,7 @@ Le principe : on retire de **1 à N bâtons** (N=2 ou 3 selon la règle), et le 
 - `nim_console.py`
   - Interface console simple : humain vs humain ou humain vs IA.
 - `nim_pygame.py`
-  - Interface graphique Pygame avec menu, tutoriel, modes de jeu et statistiques.
+  - Interface graphique Pygame entièrement revue (layout moderne, lisible, sans chevauchement).
 
 ---
 
@@ -54,12 +54,6 @@ python ia.py
 python nim_console.py
 ```
 
-Tu peux choisir :
-- la règle (1-2 ou 1-2-3),
-- le nombre initial de bâtons,
-- humain vs humain ou humain vs IA,
-- charger/sauvegarder un modèle IA.
-
 ### 3) Mode Pygame
 
 ```bash
@@ -72,10 +66,13 @@ Dans le menu Pygame, tu peux configurer :
 - le nombre initial de bâtons,
 - la difficulté IA (`facile`, `moyen`, `difficile`).
 
-Tu as aussi :
-- un écran **Tutoriel**,
-- un écran **Statistiques**,
-- des raccourcis clavier en partie (`1`, `2`, `3`, `M`, `R`).
+En partie, tu peux utiliser les touches :
+- `1`, `2`, `3` pour jouer,
+- `M` pour retourner au menu,
+- `R` pour relancer rapidement,
+- `H` pour afficher/masquer l'aide en jeu.
+
+Les statistiques sont sauvegardées automatiquement dans `stats_nim.json` (réinitialisation possible depuis l'écran stats).
 
 ---
 
@@ -84,3 +81,11 @@ Tu as aussi :
 - Ajouter des animations plus avancées (transitions, effets de victoire).
 - Ajouter une sauvegarde de statistiques sur disque.
 - Enregistrer plusieurs profils IA selon les réglages.
+
+---
+
+### Tests rapides
+
+```bash
+python -m unittest -v
+```

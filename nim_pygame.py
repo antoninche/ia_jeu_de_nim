@@ -1,90 +1,112 @@
+import math
+import json
+from pathlib import Path
 import pygame
 
 from game_logic import EtatPartie
 from ia import Joueur, creer_liste_cases, entrainer_ia
 
-# ------------------------------
+# -------------------------------------------------
 # Configuration générale
-# ------------------------------
-LARGEUR = 1000
-HAUTEUR = 680
+# -------------------------------------------------
+LARGEUR = 1200
+HAUTEUR = 760
 FPS = 60
 
-# Couleurs modernes
-FOND = (18, 24, 38)
-CARTE = (30, 39, 60)
-CARTE_2 = (40, 50, 74)
-TEXTE = (235, 240, 255)
-TEXTE_FAIBLE = (170, 180, 210)
-ACCENT = (95, 145, 255)
-ACCENT_HOVER = (120, 165, 255)
-VERT = (67, 196, 126)
-ROUGE = (239, 94, 110)
+# Palette moderne (bon contraste)
+BG = (14, 19, 30)
+PANEL = (28, 35, 53)
+PANEL_ALT = (36, 45, 67)
+TEXT = (240, 244, 255)
+TEXT_MUTED = (190, 202, 232)
+PRIMARY = (82, 140, 255)
+PRIMARY_HOVER = (109, 159, 255)
+PRIMARY_SELECTED = (70, 196, 150)
+DANGER = (236, 96, 121)
+STICK_COLOR = (196, 145, 86)
+DISABLED = (91, 102, 129)
 
 NB_PARTIES_FACILE = 500
 NB_PARTIES_MOYEN = 3000
 NB_PARTIES_DIFFICILE = 12000
+FICHIER_STATS = "stats_nim.json"
 
 
 class Bouton:
-    """Bouton simple avec état activé/désactivé."""
+    """Bouton simple avec états hover / disabled / selected."""
 
     def __init__(self, x, y, w, h, texte):
         self.rect = pygame.Rect(x, y, w, h)
         self.texte = texte
         self.enabled = True
+        self.selected = False
 
     def dessiner(self, ecran, police, survol=False):
         if not self.enabled:
-            couleur = (75, 82, 102)
-            texte_couleur = (160, 165, 180)
+            color = DISABLED
+            txt_color = (178, 186, 205)
+        elif self.selected:
+            color = PRIMARY_SELECTED
+            txt_color = TEXT
         else:
-            couleur = ACCENT_HOVER if survol else ACCENT
-            texte_couleur = TEXTE
+            color = PRIMARY_HOVER if survol else PRIMARY
+            txt_color = TEXT
 
-        pygame.draw.rect(ecran, couleur, self.rect, border_radius=12)
-        texte_surface = police.render(self.texte, True, texte_couleur)
-        texte_rect = texte_surface.get_rect(center=self.rect.center)
-        ecran.blit(texte_surface, texte_rect)
+        pygame.draw.rect(ecran, color, self.rect, border_radius=14)
+        text_surface = police.render(self.texte, True, txt_color)
+        text_rect = text_surface.get_rect(center=self.rect.center)
+        ecran.blit(text_surface, text_rect)
 
     def est_clique(self, pos):
         return self.enabled and self.rect.collidepoint(pos)
 
 
 class JeuNim:
-    """Version Pygame moderne et simple du jeu de Nim."""
+    """Interface Pygame du Nim : claire, moderne, non bloquante."""
 
     def __init__(self):
         pygame.init()
-        pygame.display.set_caption("Nim - Interface moderne")
+        pygame.display.set_caption("Nim - UI moderne")
         self.ecran = pygame.display.set_mode((LARGEUR, HAUTEUR))
         self.clock = pygame.time.Clock()
 
-        self.police_titre = pygame.font.SysFont("arial", 50, bold=True)
-        self.police_h2 = pygame.font.SysFont("arial", 32, bold=True)
-        self.police_texte = pygame.font.SysFont("arial", 24)
-        self.police_small = pygame.font.SysFont("arial", 20)
+        # Polices (fallback système)
+        self.font_title = pygame.font.SysFont("segoeui,arial", 60, bold=True)
+        self.font_h1 = pygame.font.SysFont("segoeui,arial", 38, bold=True)
+        self.font_h2 = pygame.font.SysFont("segoeui,arial", 28, bold=True)
+        self.font_text = pygame.font.SysFont("trebuchetms,arial", 24)
+        self.font_small = pygame.font.SysFont("trebuchetms,arial", 20)
 
-        # Scènes : accueil -> tutoriel -> config -> entrainement -> jeu -> fin -> stats
-        self.scene = "accueil"
+        # Scènes
+        self.scene = "home"  # home | config | training | game | end | stats
 
-        # Paramètres de jeu
+        # Paramètres
         self.mode_jeu = "hvh"  # hvh | hvai | iavai
         self.max_retrait = 2
         self.nb_batons_init = 15
-
-        # Difficulté IA (utilisée pour hvai et iavai)
         self.difficulte = "moyen"
         self.nb_parties_entrainement = NB_PARTIES_MOYEN
+        self.ia_commence = False
 
-        # État partie (moteur séparé)
+        # Moteur de partie
         self.etat = EtatPartie(self.nb_batons_init, self.max_retrait)
 
         # IA
         self.cases_ia = None
         self.joueur_ia = Joueur("IA")
-        self.ia_commence = False
         self.next_ai_time = 0
+
+        # Entraînement non bloquant
+        self.training_total = 0
+        self.training_done = 0
+        self.training_batch = 200
+
+        # Animations
+        self.sticks_affiches = float(self.etat.nb_batons)
+        self.scene_alpha = 255
+
+        # Aide
+        self.show_help = False
 
         # Stats session
         self.stats = {
@@ -96,109 +118,151 @@ class JeuNim:
             "iavai_ia1": 0,
             "iavai_ia2": 0,
         }
+        self.charger_stats()
 
         self._build_ui()
 
-    # ------------------------------
-    # UI setup
-    # ------------------------------
+    # -------------------------------------------------
+    # Setup UI
+    # -------------------------------------------------
     def _build_ui(self):
-        # Accueil
-        self.btn_jouer = Bouton(350, 220, 300, 70, "Jouer")
-        self.btn_tuto = Bouton(350, 305, 300, 70, "Tutoriel")
-        self.btn_stats = Bouton(350, 390, 300, 70, "Statistiques")
-        self.btn_quitter = Bouton(350, 475, 300, 70, "Quitter")
+        # Home
+        self.btn_play = Bouton(450, 280, 300, 64, "Jouer")
+        self.btn_stats = Bouton(450, 364, 300, 64, "Statistiques")
+        self.btn_quit = Bouton(450, 448, 300, 64, "Quitter")
 
-        # Tutoriel
-        self.btn_tuto_retour = Bouton(390, 575, 220, 55, "Retour")
+        # Config
+        self.btn_mode_hvh = Bouton(90, 210, 300, 56, "Humain vs Humain")
+        self.btn_mode_hvai = Bouton(90, 280, 300, 56, "Humain vs IA")
+        self.btn_mode_iavai = Bouton(90, 350, 300, 56, "IA vs IA")
 
-        # Configuration
-        self.btn_mode_hvh = Bouton(70, 170, 270, 55, "Humain vs Humain")
-        self.btn_mode_hvai = Bouton(365, 170, 270, 55, "Humain vs IA")
-        self.btn_mode_iavai = Bouton(660, 170, 270, 55, "IA vs IA")
+        self.btn_regle2 = Bouton(450, 210, 300, 56, "Règle 1..2")
+        self.btn_regle3 = Bouton(450, 280, 300, 56, "Règle 1..3")
 
-        self.btn_regle_2 = Bouton(200, 255, 270, 55, "Règle: 1 à 2")
-        self.btn_regle_3 = Bouton(530, 255, 270, 55, "Règle: 1 à 3")
+        self.btn_diff_easy = Bouton(810, 210, 300, 56, "IA Facile")
+        self.btn_diff_med = Bouton(810, 280, 300, 56, "IA Moyen")
+        self.btn_diff_hard = Bouton(810, 350, 300, 56, "IA Difficile")
 
-        self.btn_diff_facile = Bouton(140, 340, 220, 55, "IA Facile")
-        self.btn_diff_moyen = Bouton(390, 340, 220, 55, "IA Moyen")
-        self.btn_diff_difficile = Bouton(640, 340, 220, 55, "IA Difficile")
+        self.btn_stick_minus = Bouton(500, 460, 56, 50, "-")
+        self.btn_stick_plus = Bouton(644, 460, 56, 50, "+")
 
-        self.btn_batons_moins = Bouton(250, 430, 60, 50, "-")
-        self.btn_batons_plus = Bouton(690, 430, 60, 50, "+")
+        self.btn_ia_starts = Bouton(450, 540, 300, 52, "IA commence: Non")
 
-        self.btn_ia_commence = Bouton(320, 515, 360, 50, "IA commence: Non")
+        self.btn_back = Bouton(90, 660, 220, 52, "Retour")
+        self.btn_start = Bouton(890, 660, 220, 52, "Lancer")
 
-        self.btn_lancer = Bouton(720, 610, 220, 45, "Lancer")
-        self.btn_retour = Bouton(60, 610, 220, 45, "Retour")
+        # Game
+        self.btn_take1 = Bouton(380, 666, 130, 50, "Prendre 1")
+        self.btn_take2 = Bouton(535, 666, 130, 50, "Prendre 2")
+        self.btn_take3 = Bouton(690, 666, 130, 50, "Prendre 3")
+        self.btn_game_menu = Bouton(24, 24, 180, 46, "Menu")
 
-        # Jeu
-        self.btn_take_1 = Bouton(230, 560, 160, 65, "Prendre 1")
-        self.btn_take_2 = Bouton(420, 560, 160, 65, "Prendre 2")
-        self.btn_take_3 = Bouton(610, 560, 160, 65, "Prendre 3")
-
-        self.btn_menu = Bouton(40, 30, 180, 45, "Menu")
-
-        # Fin
-        self.btn_rejouer = Bouton(220, 500, 220, 65, "Rejouer")
-        self.btn_reconfig = Bouton(470, 500, 220, 65, "Reconfigurer")
-        self.btn_rapide = Bouton(720, 500, 180, 65, "Partie rapide")
+        # End
+        self.btn_replay = Bouton(360, 560, 220, 58, "Rejouer")
+        self.btn_reconfig = Bouton(600, 560, 220, 58, "Configurer")
 
         # Stats
-        self.btn_stats_retour = Bouton(390, 575, 220, 55, "Retour")
+        self.btn_stats_back = Bouton(350, 660, 220, 52, "Retour")
+        self.btn_stats_reset = Bouton(630, 660, 220, 52, "Réinitialiser")
 
-    # ------------------------------
-    # Logique de jeu
-    # ------------------------------
-    def maj_etat_depuis_config(self):
-        self.etat = EtatPartie(self.nb_batons_init, self.max_retrait)
+    # -------------------------------------------------
+    # Helpers UI
+    # -------------------------------------------------
+    def switch_scene(self, name: str):
+        self.scene = name
+        self.scene_alpha = 255
 
-    def maj_difficulte(self, difficulte: str):
-        self.difficulte = difficulte
-        if difficulte == "facile":
-            self.nb_parties_entrainement = NB_PARTIES_FACILE
-        elif difficulte == "moyen":
-            self.nb_parties_entrainement = NB_PARTIES_MOYEN
-        else:
-            self.nb_parties_entrainement = NB_PARTIES_DIFFICILE
+    def draw_scene_fade(self):
+        if self.scene_alpha <= 0:
+            return
+        overlay = pygame.Surface((LARGEUR, HAUTEUR), pygame.SRCALPHA)
+        overlay.fill((0, 0, 0, self.scene_alpha))
+        self.ecran.blit(overlay, (0, 0))
+        self.scene_alpha = max(0, self.scene_alpha - 18)
 
-    def texte_mode(self):
+    def draw_text_center(self, txt, font, color, y):
+        surf = font.render(txt, True, color)
+        rect = surf.get_rect(center=(LARGEUR // 2, y))
+        self.ecran.blit(surf, rect)
+
+    def draw_panel(self, x, y, w, h, alt=False):
+        color = PANEL_ALT if alt else PANEL
+        pygame.draw.rect(self.ecran, color, (x, y, w, h), border_radius=18)
+
+    def mode_label(self):
         if self.mode_jeu == "hvh":
             return "Humain vs Humain"
         if self.mode_jeu == "hvai":
             return "Humain vs IA"
         return "IA vs IA"
 
+    def maj_difficulte(self, name: str):
+        self.difficulte = name
+        if name == "facile":
+            self.nb_parties_entrainement = NB_PARTIES_FACILE
+        elif name == "moyen":
+            self.nb_parties_entrainement = NB_PARTIES_MOYEN
+        else:
+            self.nb_parties_entrainement = NB_PARTIES_DIFFICILE
+
+    def sync_selected_buttons(self):
+        # mode
+        self.btn_mode_hvh.selected = self.mode_jeu == "hvh"
+        self.btn_mode_hvai.selected = self.mode_jeu == "hvai"
+        self.btn_mode_iavai.selected = self.mode_jeu == "iavai"
+
+        # règle
+        self.btn_regle2.selected = self.max_retrait == 2
+        self.btn_regle3.selected = self.max_retrait == 3
+
+        # difficulté
+        self.btn_diff_easy.selected = self.difficulte == "facile"
+        self.btn_diff_med.selected = self.difficulte == "moyen"
+        self.btn_diff_hard.selected = self.difficulte == "difficile"
+
+    # -------------------------------------------------
+    # Moteur de partie
+    # -------------------------------------------------
+    def reset_state_from_config(self):
+        self.etat = EtatPartie(self.nb_batons_init, self.max_retrait)
+        self.sticks_affiches = float(self.etat.nb_batons)
+
     def demarrer_partie(self):
-        self.maj_etat_depuis_config()
-        self.scene = "jeu"
+        self.reset_state_from_config()
+        self.switch_scene("game")
 
         if self.mode_jeu == "hvai" and self.ia_commence:
             self.etat.joueur_courant = 2
-            self.next_ai_time = pygame.time.get_ticks() + 500
+            self.next_ai_time = pygame.time.get_ticks() + 450
 
         if self.mode_jeu == "iavai":
             self.etat.joueur_courant = 1
-            self.next_ai_time = pygame.time.get_ticks() + 500
+            self.next_ai_time = pygame.time.get_ticks() + 450
 
-    def lancer_partie_depuis_config(self):
-        # Entraînement nécessaire si l'IA participe
+    def demarrer_entrainement(self):
+        self.cases_ia = creer_liste_cases(self.nb_batons_init, self.max_retrait)
+        self.training_total = self.nb_parties_entrainement
+        self.training_done = 0
+        self.switch_scene("training")
+
+    def update_training(self):
+        if self.scene != "training":
+            return
+
+        if self.training_done >= self.training_total:
+            self.demarrer_partie()
+            return
+
+        reste = self.training_total - self.training_done
+        lot = min(self.training_batch, reste)
+        entrainer_ia(self.cases_ia, lot)
+        self.training_done += lot
+
+    def lancer_depuis_config(self):
         if self.mode_jeu in ("hvai", "iavai"):
-            self.scene = "entrainement"
-            self.ecran.fill(FOND)
-            self.dessiner_texte_centre("Entraînement IA en cours...", self.police_h2, TEXTE, 300)
-            self.dessiner_texte_centre(
-                f"Difficulté: {self.difficulte} ({self.nb_parties_entrainement} parties)",
-                self.police_texte,
-                TEXTE_FAIBLE,
-                350,
-            )
-            pygame.display.flip()
-
-            self.cases_ia = creer_liste_cases(self.nb_batons_init, self.max_retrait)
-            entrainer_ia(self.cases_ia, self.nb_parties_entrainement)
-
-        self.demarrer_partie()
+            self.demarrer_entrainement()
+        else:
+            self.demarrer_partie()
 
     def jouer_coup(self, retrait: int):
         ok = self.etat.jouer_coup(retrait)
@@ -206,7 +270,7 @@ class JeuNim:
             return
 
         if self.etat.gagnant is not None:
-            self.scene = "fin"
+            self.switch_scene("end")
             self.stats["parties"] += 1
 
             if self.mode_jeu == "hvh":
@@ -224,13 +288,14 @@ class JeuNim:
                     self.stats["iavai_ia1"] += 1
                 else:
                     self.stats["iavai_ia2"] += 1
+            self.sauvegarder_stats()
             return
 
         if self.mode_jeu in ("hvai", "iavai"):
-            self.next_ai_time = pygame.time.get_ticks() + 500
+            self.next_ai_time = pygame.time.get_ticks() + 450
 
-    def jouer_coup_ia_si_necessaire(self):
-        if self.scene != "jeu":
+    def update_ai(self):
+        if self.scene != "game":
             return
         if self.mode_jeu not in ("hvai", "iavai"):
             return
@@ -243,256 +308,257 @@ class JeuNim:
         action = self.joueur_ia.tire_une_boule(self.cases_ia[self.etat.nb_batons])
         self.jouer_coup(action)
 
-    # ------------------------------
-    # Dessin utilitaire
-    # ------------------------------
-    def dessiner_texte_centre(self, texte, police, couleur, y):
-        surf = police.render(texte, True, couleur)
-        rect = surf.get_rect(center=(LARGEUR // 2, y))
-        self.ecran.blit(surf, rect)
+    def update_animations(self):
+        """Animation douce du nombre de bâtons affichés."""
+        target = float(self.etat.nb_batons)
+        if abs(self.sticks_affiches - target) < 0.02:
+            self.sticks_affiches = target
+            return
 
-    def dessiner_carte(self, x, y, w, h):
-        pygame.draw.rect(self.ecran, CARTE, (x, y, w, h), border_radius=18)
+        vitesse = 0.28
+        self.sticks_affiches += (target - self.sticks_affiches) * vitesse
 
-    def dessiner_batons(self):
-        zone_x = 120
-        zone_y = 210
-        zone_w = 760
-        colonnes = 14
-        espacement = zone_w // colonnes
+    def sauvegarder_stats(self):
+        """Sauvegarde les stats de session sur disque."""
+        with open(FICHIER_STATS, "w", encoding="utf-8") as f:
+            json.dump(self.stats, f, ensure_ascii=False, indent=2)
 
-        for i in range(self.etat.nb_batons):
-            c = i % colonnes
-            l = i // colonnes
-            x = zone_x + c * espacement + 8
-            y = zone_y + l * 105
-            pygame.draw.rect(self.ecran, (191, 139, 82), (x, y, 14, 86), border_radius=4)
+    def charger_stats(self):
+        """Charge les stats si le fichier existe."""
+        path = Path(FICHIER_STATS)
+        if not path.exists():
+            return
+        try:
+            data = json.loads(path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            return
 
-    def dessiner_resume_partie(self):
-        """Affiche les paramètres actifs pour une prise en main rapide."""
-        lignes = [
-            f"Mode: {self.texte_mode()}",
-            f"Règle: 1 à {self.max_retrait}",
-            f"Bâtons initiaux: {self.nb_batons_init}",
-            "Raccourcis: 1/2/3 pour jouer, M menu, R partie rapide",
+        for cle in self.stats:
+            if cle in data and isinstance(data[cle], int):
+                self.stats[cle] = data[cle]
+
+    def reset_stats(self):
+        for cle in self.stats:
+            self.stats[cle] = 0
+        self.sauvegarder_stats()
+
+    # -------------------------------------------------
+    # Dessin des scènes
+    # -------------------------------------------------
+    def draw_help_overlay(self):
+        if not self.show_help:
+            return
+
+        overlay = pygame.Surface((LARGEUR, HAUTEUR), pygame.SRCALPHA)
+        overlay.fill((0, 0, 0, 140))
+        self.ecran.blit(overlay, (0, 0))
+        self.draw_panel(250, 200, 700, 300)
+        self.draw_text_center("Aide rapide", self.font_h1, TEXT, 260)
+        lines = [
+            "1 / 2 / 3 : jouer un coup",
+            "M : retour menu config",
+            "R : relancer une partie",
+            "H : afficher/masquer cette aide",
         ]
+        y = 330
+        for l in lines:
+            self.draw_text_center(l, self.font_text, TEXT_MUTED, y)
+            y += 46
 
-        if self.mode_jeu in ("hvai", "iavai"):
-            lignes.append(f"Difficulté IA: {self.difficulte} ({self.nb_parties_entrainement} parties)")
-
-        y = 70
-        for ligne in lignes:
-            texte = self.police_small.render(ligne, True, TEXTE_FAIBLE)
-            self.ecran.blit(texte, (560, y))
-            y += 24
-
-    # ------------------------------
-    # Dessin scènes
-    # ------------------------------
-    def dessiner_accueil(self):
-        self.ecran.fill(FOND)
-        self.dessiner_carte(170, 80, 660, 520)
-        self.dessiner_texte_centre("Jeu de Nim", self.police_titre, TEXTE, 150)
-        self.dessiner_texte_centre("Simple, stratégique, moderne", self.police_texte, TEXTE_FAIBLE, 200)
+    def draw_home(self):
+        self.ecran.fill(BG)
+        self.draw_panel(260, 80, 680, 600)
+        self.draw_text_center("Nim", self.font_title, TEXT, 170)
+        self.draw_text_center("Interface moderne • Lisible • Rapide", self.font_text, TEXT_MUTED, 220)
 
         pos = pygame.mouse.get_pos()
-        self.btn_jouer.dessiner(self.ecran, self.police_h2, self.btn_jouer.rect.collidepoint(pos))
-        self.btn_tuto.dessiner(self.ecran, self.police_h2, self.btn_tuto.rect.collidepoint(pos))
-        self.btn_stats.dessiner(self.ecran, self.police_h2, self.btn_stats.rect.collidepoint(pos))
-        self.btn_quitter.dessiner(self.ecran, self.police_h2, self.btn_quitter.rect.collidepoint(pos))
+        self.btn_play.dessiner(self.ecran, self.font_h2, self.btn_play.rect.collidepoint(pos))
+        self.btn_stats.dessiner(self.ecran, self.font_h2, self.btn_stats.rect.collidepoint(pos))
+        self.btn_quit.dessiner(self.ecran, self.font_h2, self.btn_quit.rect.collidepoint(pos))
 
-    def dessiner_tutoriel(self):
-        self.ecran.fill(FOND)
-        self.dessiner_carte(90, 60, 820, 560)
-        self.dessiner_texte_centre("Tutoriel rapide", self.police_h2, TEXTE, 120)
+    def draw_config(self):
+        self.sync_selected_buttons()
 
-        lignes = [
-            "Objectif : prendre le dernier bâton pour gagner.",
-            "À chaque tour, tu prends entre 1 et max_retrait bâtons.",
-            "En mode Humain vs IA : la difficulté change le nombre de parties d'entraînement.",
-            "Raccourcis clavier en partie : 1/2/3 pour jouer, M menu, R partie rapide.",
+        self.ecran.fill(BG)
+        self.draw_text_center("Configuration", self.font_h1, TEXT, 62)
+
+        # 3 colonnes pour limiter la densité
+        self.draw_panel(60, 140, 360, 470)
+        self.draw_panel(430, 140, 340, 470)
+        self.draw_panel(780, 140, 360, 470)
+
+        self.ecran.blit(self.font_h2.render("Mode", True, TEXT), (90, 160))
+        self.ecran.blit(self.font_h2.render("Règles", True, TEXT), (460, 160))
+        self.ecran.blit(self.font_h2.render("IA", True, TEXT), (810, 160))
+
+        pos = pygame.mouse.get_pos()
+
+        self.btn_mode_hvh.dessiner(self.ecran, self.font_text, self.btn_mode_hvh.rect.collidepoint(pos))
+        self.btn_mode_hvai.dessiner(self.ecran, self.font_text, self.btn_mode_hvai.rect.collidepoint(pos))
+        self.btn_mode_iavai.dessiner(self.ecran, self.font_text, self.btn_mode_iavai.rect.collidepoint(pos))
+
+        self.btn_regle2.dessiner(self.ecran, self.font_text, self.btn_regle2.rect.collidepoint(pos))
+        self.btn_regle3.dessiner(self.ecran, self.font_text, self.btn_regle3.rect.collidepoint(pos))
+
+        self.btn_diff_easy.enabled = self.mode_jeu in ("hvai", "iavai")
+        self.btn_diff_med.enabled = self.mode_jeu in ("hvai", "iavai")
+        self.btn_diff_hard.enabled = self.mode_jeu in ("hvai", "iavai")
+        self.btn_diff_easy.dessiner(self.ecran, self.font_text, self.btn_diff_easy.rect.collidepoint(pos))
+        self.btn_diff_med.dessiner(self.ecran, self.font_text, self.btn_diff_med.rect.collidepoint(pos))
+        self.btn_diff_hard.dessiner(self.ecran, self.font_text, self.btn_diff_hard.rect.collidepoint(pos))
+
+        info_lines = [
+            f"Mode actuel: {self.mode_label()}",
+            f"Règle: prendre 1..{self.max_retrait}",
+            f"Difficulté IA: {self.difficulte} ({self.nb_parties_entrainement})",
         ]
+        y = 430
+        for line in info_lines:
+            self.ecran.blit(self.font_small.render(line, True, TEXT_MUTED), (90, y))
+            y += 30
 
-        y = 210
-        for ligne in lignes:
-            self.dessiner_texte_centre(ligne, self.police_texte, TEXTE_FAIBLE, y)
-            y += 70
+        self.ecran.blit(self.font_text.render("Bâtons initiaux", True, TEXT), (488, 430))
+        self.btn_stick_minus.dessiner(self.ecran, self.font_h2, self.btn_stick_minus.rect.collidepoint(pos))
+        self.btn_stick_plus.dessiner(self.ecran, self.font_h2, self.btn_stick_plus.rect.collidepoint(pos))
+        self.draw_panel(566, 458, 70, 52, alt=True)
+        self.draw_text_center(str(self.nb_batons_init), self.font_text, TEXT, 485)
+
+        self.btn_ia_starts.enabled = self.mode_jeu == "hvai"
+        self.btn_ia_starts.texte = "IA commence: Oui" if self.ia_commence else "IA commence: Non"
+        self.btn_ia_starts.dessiner(self.ecran, self.font_small, self.btn_ia_starts.rect.collidepoint(pos))
+
+        self.btn_back.dessiner(self.ecran, self.font_text, self.btn_back.rect.collidepoint(pos))
+        self.btn_start.dessiner(self.ecran, self.font_text, self.btn_start.rect.collidepoint(pos))
+
+    def draw_training(self):
+        self.ecran.fill(BG)
+        self.draw_panel(250, 220, 700, 280)
+        self.draw_text_center("Entraînement IA en cours...", self.font_h1, TEXT, 295)
+        self.draw_text_center(
+            f"{self.difficulte} ({self.training_done}/{self.training_total})", self.font_text, TEXT_MUTED, 340
+        )
+
+        # barre progression
+        ratio = 0 if self.training_total == 0 else self.training_done / self.training_total
+        bx, by, bw, bh = 330, 390, 540, 28
+        pygame.draw.rect(self.ecran, PANEL_ALT, (bx, by, bw, bh), border_radius=12)
+        pygame.draw.rect(self.ecran, PRIMARY_SELECTED, (bx, by, int(bw * ratio), bh), border_radius=12)
+
+    def draw_game(self):
+        self.ecran.fill(BG)
+        self.draw_panel(20, 20, 1160, 720)
 
         pos = pygame.mouse.get_pos()
-        self.btn_tuto_retour.dessiner(
-            self.ecran, self.police_texte, self.btn_tuto_retour.rect.collidepoint(pos)
-        )
-
-    def dessiner_config(self):
-        self.ecran.fill(FOND)
-        self.dessiner_carte(35, 35, 930, 610)
-        self.dessiner_texte_centre("Configuration de la partie", self.police_h2, TEXTE, 78)
-
-        pos = pygame.mouse.get_pos()
-
-        # Modes
-        self.btn_mode_hvh.dessiner(self.ecran, self.police_small, self.btn_mode_hvh.rect.collidepoint(pos))
-        self.btn_mode_hvai.dessiner(self.ecran, self.police_small, self.btn_mode_hvai.rect.collidepoint(pos))
-        self.btn_mode_iavai.dessiner(self.ecran, self.police_small, self.btn_mode_iavai.rect.collidepoint(pos))
-        self.ecran.blit(self.police_small.render(f"Mode actuel : {self.texte_mode()}", True, TEXTE_FAIBLE), (390, 230))
-
-        # Règle
-        self.btn_regle_2.dessiner(self.ecran, self.police_texte, self.btn_regle_2.rect.collidepoint(pos))
-        self.btn_regle_3.dessiner(self.ecran, self.police_texte, self.btn_regle_3.rect.collidepoint(pos))
-        self.ecran.blit(
-            self.police_small.render(f"Règle actuelle : prendre 1 à {self.max_retrait}", True, TEXTE_FAIBLE),
-            (350, 320),
-        )
-
-        # Difficulté
-        self.btn_diff_facile.enabled = self.mode_jeu in ("hvai", "iavai")
-        self.btn_diff_moyen.enabled = self.mode_jeu in ("hvai", "iavai")
-        self.btn_diff_difficile.enabled = self.mode_jeu in ("hvai", "iavai")
-
-        self.btn_diff_facile.dessiner(
-            self.ecran, self.police_small, self.btn_diff_facile.rect.collidepoint(pos)
-        )
-        self.btn_diff_moyen.dessiner(
-            self.ecran, self.police_small, self.btn_diff_moyen.rect.collidepoint(pos)
-        )
-        self.btn_diff_difficile.dessiner(
-            self.ecran, self.police_small, self.btn_diff_difficile.rect.collidepoint(pos)
-        )
-
-        diff_txt = f"Difficulté actuelle : {self.difficulte} ({self.nb_parties_entrainement} parties)"
-        self.ecran.blit(self.police_small.render(diff_txt, True, TEXTE_FAIBLE), (270, 405))
-
-        # Bâtons initiaux
-        self.ecran.blit(self.police_texte.render("Bâtons initiaux", True, TEXTE), (90, 444))
-        self.btn_batons_moins.dessiner(
-            self.ecran, self.police_texte, self.btn_batons_moins.rect.collidepoint(pos)
-        )
-        self.btn_batons_plus.dessiner(self.ecran, self.police_texte, self.btn_batons_plus.rect.collidepoint(pos))
-        pygame.draw.rect(self.ecran, CARTE_2, (380, 430, 240, 52), border_radius=10)
-        self.dessiner_texte_centre(str(self.nb_batons_init), self.police_texte, TEXTE, 456)
-
-        # IA commence
-        self.btn_ia_commence.enabled = self.mode_jeu == "hvai"
-        texte_start = "IA commence: Oui" if self.ia_commence else "IA commence: Non"
-        self.btn_ia_commence.texte = texte_start
-        self.btn_ia_commence.dessiner(
-            self.ecran, self.police_small, self.btn_ia_commence.rect.collidepoint(pos)
-        )
-
-        self.btn_retour.dessiner(self.ecran, self.police_small, self.btn_retour.rect.collidepoint(pos))
-        self.btn_lancer.dessiner(self.ecran, self.police_small, self.btn_lancer.rect.collidepoint(pos))
-
-    def dessiner_jeu(self):
-        self.ecran.fill(FOND)
-        self.dessiner_carte(20, 20, 960, 640)
-
-        pos = pygame.mouse.get_pos()
-        self.btn_menu.dessiner(self.ecran, self.police_small, self.btn_menu.rect.collidepoint(pos))
+        self.btn_game_menu.dessiner(self.ecran, self.font_small, self.btn_game_menu.rect.collidepoint(pos))
 
         if self.mode_jeu == "hvai":
-            if self.etat.joueur_courant == 2:
-                tour_txt = "Tour de l'IA..."
-                couleur_tour = ACCENT
-            else:
-                tour_txt = "Tour de l'humain"
-                couleur_tour = VERT
+            tour_txt = "Tour de l'IA" if self.etat.joueur_courant == 2 else "Tour de l'humain"
+            tour_color = PRIMARY if self.etat.joueur_courant == 2 else PRIMARY_SELECTED
         elif self.mode_jeu == "iavai":
-            tour_txt = f"Tour de l'IA {self.etat.joueur_courant}"
-            couleur_tour = ACCENT
+            tour_txt = f"Tour IA {self.etat.joueur_courant}"
+            tour_color = PRIMARY
         else:
-            tour_txt = f"Tour du Joueur {self.etat.joueur_courant}"
-            couleur_tour = VERT if self.etat.joueur_courant == 1 else ROUGE
+            tour_txt = f"Tour Joueur {self.etat.joueur_courant}"
+            tour_color = PRIMARY_SELECTED if self.etat.joueur_courant == 1 else DANGER
 
-        self.dessiner_texte_centre(tour_txt, self.police_h2, couleur_tour, 90)
-        self.dessiner_texte_centre(f"Bâtons restants : {self.etat.nb_batons}", self.police_texte, TEXTE, 130)
+        self.draw_text_center(tour_txt, self.font_h1, tour_color, 72)
+        self.draw_text_center(f"Bâtons restants: {self.etat.nb_batons}", self.font_text, TEXT, 112)
 
-        self.dessiner_resume_partie()
-        self.dessiner_batons()
+        # Zone bâtons
+        zone_x, zone_y, zone_w = 120, 160, 760
+        cols = 20
+        step = max(1, zone_w // cols)
+        nb_aff = int(math.ceil(self.sticks_affiches))
 
-        # Boutons de coups
-        coups_valides = self.etat.coups_valides()
-        self.btn_take_1.enabled = 1 in coups_valides
-        self.btn_take_2.enabled = 2 in coups_valides
-        self.btn_take_3.enabled = 3 in coups_valides and self.max_retrait >= 3
+        for i in range(nb_aff):
+            c = i % cols
+            r = i // cols
+            x = zone_x + c * step
+            y = zone_y + r * 90
+            pygame.draw.rect(self.ecran, STICK_COLOR, (x, y, 12, 72), border_radius=4)
 
-        # En mode IA, on bloque les boutons pendant les tours IA
-        if self.mode_jeu == "hvai" and self.etat.joueur_courant == 2:
-            self.btn_take_1.enabled = False
-            self.btn_take_2.enabled = False
-            self.btn_take_3.enabled = False
+        # panneau infos réduit
+        self.draw_panel(920, 160, 230, 250, alt=True)
+        info = [
+            f"Mode: {self.mode_label()}",
+            f"Règle: 1..{self.max_retrait}",
+            "H: aide  M: menu",
+            "R: relancer",
+        ]
+        y = 190
+        for line in info:
+            self.ecran.blit(self.font_small.render(line, True, TEXT_MUTED), (940, y))
+            y += 36
 
-        if self.mode_jeu == "iavai":
-            self.btn_take_1.enabled = False
-            self.btn_take_2.enabled = False
-            self.btn_take_3.enabled = False
+        valid = self.etat.coups_valides()
+        self.btn_take1.enabled = 1 in valid
+        self.btn_take2.enabled = 2 in valid
+        self.btn_take3.enabled = 3 in valid and self.max_retrait >= 3
 
-        self.btn_take_1.dessiner(self.ecran, self.police_texte, self.btn_take_1.rect.collidepoint(pos))
-        self.btn_take_2.dessiner(self.ecran, self.police_texte, self.btn_take_2.rect.collidepoint(pos))
-        self.btn_take_3.dessiner(self.ecran, self.police_texte, self.btn_take_3.rect.collidepoint(pos))
+        if (self.mode_jeu == "hvai" and self.etat.joueur_courant == 2) or self.mode_jeu == "iavai":
+            self.btn_take1.enabled = False
+            self.btn_take2.enabled = False
+            self.btn_take3.enabled = False
 
-    def dessiner_fin(self):
-        self.ecran.fill(FOND)
-        self.dessiner_carte(100, 90, 800, 500)
-        self.dessiner_texte_centre("Fin de partie", self.police_titre, TEXTE, 170)
+        self.btn_take1.dessiner(self.ecran, self.font_text, self.btn_take1.rect.collidepoint(pos))
+        self.btn_take2.dessiner(self.ecran, self.font_text, self.btn_take2.rect.collidepoint(pos))
+        self.btn_take3.dessiner(self.ecran, self.font_text, self.btn_take3.rect.collidepoint(pos))
+
+        self.draw_help_overlay()
+
+    def draw_end(self):
+        self.ecran.fill(BG)
+        self.draw_panel(220, 120, 760, 520)
+        self.draw_text_center("Fin de partie", self.font_title, TEXT, 220)
 
         if self.mode_jeu == "hvai":
-            gagnant_txt = "Humain" if self.etat.gagnant == 1 else "IA"
+            winner = "Humain" if self.etat.gagnant == 1 else "IA"
         elif self.mode_jeu == "iavai":
-            gagnant_txt = f"IA {self.etat.gagnant}"
+            winner = f"IA {self.etat.gagnant}"
         else:
-            gagnant_txt = f"Joueur {self.etat.gagnant}"
+            winner = f"Joueur {self.etat.gagnant}"
 
-        self.dessiner_texte_centre(f"🎉 Victoire : {gagnant_txt}", self.police_h2, TEXTE, 270)
-        self.dessiner_texte_centre(
-            f"Parties jouées (session): {self.stats['parties']}", self.police_texte, TEXTE_FAIBLE, 330
-        )
+        self.draw_text_center(f"Victoire: {winner}", self.font_h1, TEXT, 320)
+        self.draw_text_center(f"Parties session: {self.stats['parties']}", self.font_text, TEXT_MUTED, 370)
 
         pos = pygame.mouse.get_pos()
-        self.btn_rejouer.dessiner(self.ecran, self.police_texte, self.btn_rejouer.rect.collidepoint(pos))
-        self.btn_reconfig.dessiner(self.ecran, self.police_texte, self.btn_reconfig.rect.collidepoint(pos))
-        self.btn_rapide.dessiner(self.ecran, self.police_small, self.btn_rapide.rect.collidepoint(pos))
+        self.btn_replay.dessiner(self.ecran, self.font_text, self.btn_replay.rect.collidepoint(pos))
+        self.btn_reconfig.dessiner(self.ecran, self.font_text, self.btn_reconfig.rect.collidepoint(pos))
 
-    def dessiner_stats(self):
-        self.ecran.fill(FOND)
-        self.dessiner_carte(120, 60, 760, 560)
-        self.dessiner_texte_centre("Statistiques de session", self.police_h2, TEXTE, 120)
+    def draw_stats(self):
+        self.ecran.fill(BG)
+        self.draw_panel(180, 80, 840, 600)
+        self.draw_text_center("Statistiques", self.font_title, TEXT, 170)
 
-        lignes = [
-            f"Parties jouées : {self.stats['parties']}",
-            f"Humain vs Humain -> J1: {self.stats['hvh_j1']} | J2: {self.stats['hvh_j2']}",
-            f"Humain vs IA -> Humain: {self.stats['hvai_humain']} | IA: {self.stats['hvai_ia']}",
-            f"IA vs IA -> IA1: {self.stats['iavai_ia1']} | IA2: {self.stats['iavai_ia2']}",
+        lines = [
+            f"Parties jouées: {self.stats['parties']}",
+            f"HvH -> J1: {self.stats['hvh_j1']} | J2: {self.stats['hvh_j2']}",
+            f"HvIA -> Humain: {self.stats['hvai_humain']} | IA: {self.stats['hvai_ia']}",
+            f"IAvIA -> IA1: {self.stats['iavai_ia1']} | IA2: {self.stats['iavai_ia2']}",
         ]
 
-        y = 220
-        for ligne in lignes:
-            self.dessiner_texte_centre(ligne, self.police_texte, TEXTE_FAIBLE, y)
+        y = 280
+        for line in lines:
+            self.draw_text_center(line, self.font_text, TEXT_MUTED, y)
             y += 58
 
         pos = pygame.mouse.get_pos()
-        self.btn_stats_retour.dessiner(
-            self.ecran, self.police_texte, self.btn_stats_retour.rect.collidepoint(pos)
-        )
+        self.btn_stats_back.dessiner(self.ecran, self.font_text, self.btn_stats_back.rect.collidepoint(pos))
+        self.btn_stats_reset.dessiner(self.ecran, self.font_text, self.btn_stats_reset.rect.collidepoint(pos))
 
-    # ------------------------------
-    # Événements
-    # ------------------------------
-    def clic_accueil(self, pos):
-        if self.btn_jouer.est_clique(pos):
-            self.scene = "config"
-        elif self.btn_tuto.est_clique(pos):
-            self.scene = "tutoriel"
+    # -------------------------------------------------
+    # Gestion événements
+    # -------------------------------------------------
+    def handle_click_home(self, pos):
+        if self.btn_play.est_clique(pos):
+            self.switch_scene("config")
         elif self.btn_stats.est_clique(pos):
-            self.scene = "stats"
-        elif self.btn_quitter.est_clique(pos):
+            self.switch_scene("stats")
+        elif self.btn_quit.est_clique(pos):
             return False
         return True
 
-    def clic_tutoriel(self, pos):
-        if self.btn_tuto_retour.est_clique(pos):
-            self.scene = "accueil"
-
-    def clic_config(self, pos):
+    def handle_click_config(self, pos):
         if self.btn_mode_hvh.est_clique(pos):
             self.mode_jeu = "hvh"
         elif self.btn_mode_hvai.est_clique(pos):
@@ -500,66 +566,69 @@ class JeuNim:
         elif self.btn_mode_iavai.est_clique(pos):
             self.mode_jeu = "iavai"
 
-        elif self.btn_regle_2.est_clique(pos):
+        elif self.btn_regle2.est_clique(pos):
             self.max_retrait = 2
-        elif self.btn_regle_3.est_clique(pos):
+        elif self.btn_regle3.est_clique(pos):
             self.max_retrait = 3
 
-        elif self.btn_diff_facile.est_clique(pos):
+        elif self.btn_diff_easy.est_clique(pos):
             self.maj_difficulte("facile")
-        elif self.btn_diff_moyen.est_clique(pos):
+        elif self.btn_diff_med.est_clique(pos):
             self.maj_difficulte("moyen")
-        elif self.btn_diff_difficile.est_clique(pos):
+        elif self.btn_diff_hard.est_clique(pos):
             self.maj_difficulte("difficile")
 
-        elif self.btn_batons_moins.est_clique(pos):
+        elif self.btn_stick_minus.est_clique(pos):
             self.nb_batons_init = max(5, self.nb_batons_init - 1)
-        elif self.btn_batons_plus.est_clique(pos):
-            self.nb_batons_init = min(80, self.nb_batons_init + 1)
+        elif self.btn_stick_plus.est_clique(pos):
+            self.nb_batons_init = min(120, self.nb_batons_init + 1)
 
-        elif self.btn_ia_commence.est_clique(pos):
+        elif self.btn_ia_starts.est_clique(pos):
             self.ia_commence = not self.ia_commence
 
-        elif self.btn_retour.est_clique(pos):
-            self.scene = "accueil"
-        elif self.btn_lancer.est_clique(pos):
-            self.lancer_partie_depuis_config()
+        elif self.btn_back.est_clique(pos):
+            self.switch_scene("home")
+        elif self.btn_start.est_clique(pos):
+            self.lancer_depuis_config()
 
-    def clic_jeu(self, pos):
-        if self.btn_menu.est_clique(pos):
-            self.scene = "config"
+    def handle_click_game(self, pos):
+        if self.btn_game_menu.est_clique(pos):
+            self.switch_scene("config")
             return
 
-        if self.btn_take_1.est_clique(pos):
+        if self.btn_take1.est_clique(pos):
             self.jouer_coup(1)
-        elif self.btn_take_2.est_clique(pos):
+        elif self.btn_take2.est_clique(pos):
             self.jouer_coup(2)
-        elif self.btn_take_3.est_clique(pos):
+        elif self.btn_take3.est_clique(pos):
             self.jouer_coup(3)
 
-    def clic_fin(self, pos):
-        if self.btn_rejouer.est_clique(pos):
+    def handle_click_end(self, pos):
+        if self.btn_replay.est_clique(pos):
             self.demarrer_partie()
         elif self.btn_reconfig.est_clique(pos):
-            self.scene = "config"
-        elif self.btn_rapide.est_clique(pos):
-            self.demarrer_partie()
+            self.switch_scene("config")
 
-    def clic_stats(self, pos):
-        if self.btn_stats_retour.est_clique(pos):
-            self.scene = "accueil"
+    def handle_click_stats(self, pos):
+        if self.btn_stats_back.est_clique(pos):
+            self.switch_scene("home")
+        elif self.btn_stats_reset.est_clique(pos):
+            self.reset_stats()
 
-    def gerer_raccourcis_clavier(self, event):
-        """UX: raccourcis pour jouer plus vite."""
+    def handle_shortcuts(self, event):
+        if event.key == pygame.K_h:
+            self.show_help = not self.show_help
+            return
+
         if event.key == pygame.K_m:
-            self.scene = "config"
+            self.switch_scene("config")
             return
 
-        if event.key == pygame.K_r and self.scene in ("jeu", "fin"):
+        if event.key == pygame.K_r and self.scene in ("game", "end"):
             self.demarrer_partie()
             return
 
-        if self.scene != "jeu":
+        if self.scene != "game":
             return
 
         if event.key == pygame.K_1:
@@ -569,49 +638,50 @@ class JeuNim:
         elif event.key == pygame.K_3:
             self.jouer_coup(3)
 
-    # ------------------------------
+    # -------------------------------------------------
     # Boucle principale
-    # ------------------------------
+    # -------------------------------------------------
     def run(self):
-        en_cours = True
+        running = True
 
-        while en_cours:
+        while running:
             for event in pygame.event.get():
                 if event.type == pygame.QUIT:
-                    en_cours = False
+                    running = False
 
                 if event.type == pygame.KEYDOWN:
-                    self.gerer_raccourcis_clavier(event)
+                    self.handle_shortcuts(event)
 
                 if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
-                    if self.scene == "accueil":
-                        en_cours = self.clic_accueil(event.pos)
-                    elif self.scene == "tutoriel":
-                        self.clic_tutoriel(event.pos)
+                    if self.scene == "home":
+                        running = self.handle_click_home(event.pos)
                     elif self.scene == "config":
-                        self.clic_config(event.pos)
-                    elif self.scene == "jeu":
-                        self.clic_jeu(event.pos)
-                    elif self.scene == "fin":
-                        self.clic_fin(event.pos)
+                        self.handle_click_config(event.pos)
+                    elif self.scene == "game":
+                        self.handle_click_game(event.pos)
+                    elif self.scene == "end":
+                        self.handle_click_end(event.pos)
                     elif self.scene == "stats":
-                        self.clic_stats(event.pos)
+                        self.handle_click_stats(event.pos)
 
-            self.jouer_coup_ia_si_necessaire()
+            self.update_training()
+            self.update_ai()
+            self.update_animations()
 
-            if self.scene == "accueil":
-                self.dessiner_accueil()
-            elif self.scene == "tutoriel":
-                self.dessiner_tutoriel()
-            elif self.scene in ("config", "entrainement"):
-                self.dessiner_config()
-            elif self.scene == "jeu":
-                self.dessiner_jeu()
-            elif self.scene == "fin":
-                self.dessiner_fin()
+            if self.scene == "home":
+                self.draw_home()
+            elif self.scene == "config":
+                self.draw_config()
+            elif self.scene == "training":
+                self.draw_training()
+            elif self.scene == "game":
+                self.draw_game()
+            elif self.scene == "end":
+                self.draw_end()
             elif self.scene == "stats":
-                self.dessiner_stats()
+                self.draw_stats()
 
+            self.draw_scene_fade()
             pygame.display.flip()
             self.clock.tick(FPS)
 
