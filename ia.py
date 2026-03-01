@@ -1,148 +1,168 @@
+from __future__ import annotations
+
 from random import randint
+import json
 
 NOMBRE_BOULES_INIT = 20
+NB_BATONS_DEFAUT = 10
+MAX_RETRAIT_DEFAUT = 2
+
+
 class Case:
-    def __init__(self, nombre_case: int, boules_jaune: int, boules_rouge: int):
+    """État du jeu pour un nombre de bâtons donné."""
+
+    def __init__(self, nombre_case: int, max_retrait: int, poids: dict[int, int] | None = None):
         self.nombre_case = nombre_case
-        self.boules_jaune = boules_jaune
-        self.boules_rouge = boules_rouge
+        self.max_retrait = max_retrait
+
+        if poids is None:
+            self.poids_actions = self._poids_initiaux()
+        else:
+            self.poids_actions = {action: int(val) for action, val in poids.items()}
+
+    @property
+    def boules_jaune(self) -> int:
+        """Compatibilité avec l'ancien code (action 1)."""
+        return self.poids_actions.get(1, 0)
+
+    @property
+    def boules_rouge(self) -> int:
+        """Compatibilité avec l'ancien code (action 2)."""
+        return self.poids_actions.get(2, 0)
 
     def __eq__(self, o):
-        return self.nombre_case == o.nombre_case
-    
+        return isinstance(o, Case) and self.nombre_case == o.nombre_case
+
     def __repr__(self):
-        return f'Case numéro {self.nombre_case}. Boules Jaunes: {self.boules_jaune}. | Boules Rouges: {self.boules_rouge}.'
-    
+        return f"Case {self.nombre_case} | poids={self.poids_actions}"
+
+    def _poids_initiaux(self) -> dict[int, int]:
+        if self.nombre_case == 0:
+            return {action: 0 for action in range(1, self.max_retrait + 1)}
+
+        poids = {}
+        for action in range(1, self.max_retrait + 1):
+            # action impossible si elle dépasse le nombre de bâtons restants
+            if action > self.nombre_case:
+                poids[action] = 0
+            else:
+                poids[action] = NOMBRE_BOULES_INIT
+        return poids
+
     def reset(self):
-        # Réinitialise la case (sauf contraintes de l'état 1)
-        if self.nombre_case == 1:
-            self.boules_jaune = NOMBRE_BOULES_INIT
-            self.boules_rouge = 0
-        elif self.nombre_case == 0:
-            self.boules_jaune = 0
-            self.boules_rouge = 0
-        else:
-            self.boules_jaune = NOMBRE_BOULES_INIT
-            self.boules_rouge = NOMBRE_BOULES_INIT
+        self.poids_actions = self._poids_initiaux()
 
-    def ajouter_boule(self, num_boule: int):
-        assert num_boule in (1, 2)
-        if num_boule == 1:
-            self.boules_jaune += 1
-        else:
-            self.boules_rouge += 1
+    def actions_valides(self) -> list[int]:
+        return [action for action in range(1, self.max_retrait + 1) if action <= self.nombre_case]
 
-    def supprimer_boule(self, num_boule: int):
-        """Punition : on enlève 1 boule si possible (sans passer en négatif)."""
-        assert num_boule in (1, 2)
-        if num_boule == 1:
-            if self.boules_jaune > 0:
-                self.boules_jaune -= 1
-        else:
-            if self.boules_rouge > 0:
-                self.boules_rouge -= 1
-                
+    def ajouter_boule(self, action: int):
+        if action not in self.poids_actions:
+            return
+        self.poids_actions[action] += 1
+
+    def supprimer_boule(self, action: int):
+        if action not in self.poids_actions:
+            return
+        if self.poids_actions[action] > 0:
+            self.poids_actions[action] -= 1
+
+    def total_boules(self) -> int:
+        return sum(self.poids_actions.values())
+
+    def tirage_pondere(self) -> int:
+        """Retourne l'action tirée selon les poids. Fallback uniforme si total=0."""
+        total = self.total_boules()
+        if total == 0:
+            self.reset()
+            total = self.total_boules()
+
+        if total == 0:
+            # Cas limite : sécurité
+            return 1
+
+        tirage = randint(1, total)
+        cumul = 0
+        for action in range(1, self.max_retrait + 1):
+            cumul += self.poids_actions.get(action, 0)
+            if tirage <= cumul:
+                return action
+
+        return 1
+
+    def action_preferee(self) -> int | None:
+        meilleures = []
+        max_boules = -1
+        for action in self.actions_valides():
+            valeur = self.poids_actions.get(action, 0)
+            if valeur > max_boules:
+                max_boules = valeur
+                meilleures = [action]
+            elif valeur == max_boules:
+                meilleures.append(action)
+
+        if not meilleures:
+            return None
+        if len(meilleures) > 1:
+            return None
+        return meilleures[0]
+
     def recap(self):
-        total = self.boules_jaune + self.boules_rouge
-    
         print(f"\nCase {self.nombre_case}")
-        print(f"  Boules jaunes (prendre 1) : {self.boules_jaune}")
-        print(f"  Boules rouges (prendre 2) : {self.boules_rouge}")
-    
-        # --- Cas terminal ---
+        for action in self.actions_valides():
+            print(f"  Boules action {action} : {self.poids_actions[action]}")
+
         if self.nombre_case == 0:
             print("  Position terminale : partie finie.")
             return
-    
-        # --- Théorie ---
-        if self.nombre_case % 3 == 0:
-            print("  Théorie : POSITION PERDANTE (multiple de 3)")
+
+        # Théorie Nim : positions perdantes = multiples de (max_retrait + 1)
+        modulo = self.max_retrait + 1
+        if self.nombre_case % modulo == 0:
+            print(f"  Théorie : POSITION PERDANTE (multiple de {modulo})")
             print("  Aucun coup gagnant garanti.")
         else:
-            coup_theorique = self.nombre_case % 3
+            coup_theorique = self.nombre_case % modulo
             print("  Théorie : POSITION GAGNANTE")
             print(f"  Coup optimal théorique : prendre {coup_theorique}")
-    
-        # --- Apprentissage observé ---
-        if total == 0:
-            print("  ✅ IA : Comportement normal pour une position perdante")
-            return
-    
-        if self.boules_jaune > self.boules_rouge:
-            coup_ia = 1
-        elif self.boules_rouge > self.boules_jaune:
-            coup_ia = 2
-        else:
-            coup_ia = None
-    
+
+        coup_ia = self.action_preferee()
         if coup_ia is None:
             print("  IA : indécise (répartition équilibrée)")
         else:
             print(f"  IA : préfère prendre {coup_ia}")
-    
-        # --- Comparaison ---
-        if self.nombre_case % 3 != 0 and coup_ia == self.nombre_case % 3:
-            print("  ✅ Apprentissage COHÉRENT avec la théorie")
-        elif self.nombre_case % 3 == 0:
-            print("  ✅ Comportement normal pour une position perdante")
-        else:
-            print("  ❌ Apprentissage NON cohérent (bruit ou reset)")
 
 
 class Joueur:
     def __init__(self, num_j):
         self.num_j = num_j
-        
+
     def __repr__(self):
-        return 'Joueur '+str(self.num_j)
+        return "Joueur " + str(self.num_j)
 
     def tire_une_boule(self, case: Case):
-        total = case.boules_jaune + case.boules_rouge
-        if total == 0:
-            case.reset()
-            total = case.boules_jaune + case.boules_rouge
+        return case.tirage_pondere()
 
 
-        tirage = randint(1, total)
-        if tirage <= case.boules_jaune:
-            return 1  # jaune => prendre 1
-        else:
-            return 2  # rouge => prendre 2
+def creer_liste_cases(
+    nb_batons: int = NB_BATONS_DEFAUT, max_retrait: int = MAX_RETRAIT_DEFAUT
+) -> list[Case]:
+    """Crée les cases de 0 à nb_batons."""
+    return [Case(numero, max_retrait=max_retrait) for numero in range(nb_batons + 1)]
 
 
-# --- Initialisation des cases ---
-c0 = Case(0, 0, 0)
-c1 = Case(1, NOMBRE_BOULES_INIT, 0)  # à 1 bâton restant, seule action possible = prendre 1 (jaune)
-c2 = Case(2, NOMBRE_BOULES_INIT, NOMBRE_BOULES_INIT)
-c3 = Case(3, NOMBRE_BOULES_INIT, NOMBRE_BOULES_INIT)
-c4 = Case(4, NOMBRE_BOULES_INIT, NOMBRE_BOULES_INIT)
-c5 = Case(5, NOMBRE_BOULES_INIT, NOMBRE_BOULES_INIT)
-c6 = Case(6, NOMBRE_BOULES_INIT, NOMBRE_BOULES_INIT)
-c7 = Case(7, NOMBRE_BOULES_INIT, NOMBRE_BOULES_INIT)
-c8 = Case(8, NOMBRE_BOULES_INIT, NOMBRE_BOULES_INIT)
-c9 = Case(9, NOMBRE_BOULES_INIT, NOMBRE_BOULES_INIT)
-c10 = Case(10, NOMBRE_BOULES_INIT, NOMBRE_BOULES_INIT)
-
-liste_cases = [c0, c1, c2, c3, c4, c5, c6, c7, c8, c9, c10]
-
-joueur1 = Joueur(1)
-joueur2 = Joueur(2)
-
-
-def tour(j1: Joueur, j2: Joueur):
-
+def tour(j1: Joueur, j2: Joueur, liste_cases: list[Case], case_depart: int):
     liste_jeu_j1 = []  # liste de (etat, action)
     liste_jeu_j2 = []
 
-    case_actuelle = 10
+    case_actuelle = case_depart
     joueur1_joue = True
-    dernier_joueur = None  # 1 ou 2
+    dernier_joueur = None
 
     while case_actuelle != 0:
         case_obj = liste_cases[case_actuelle]
 
         if joueur1_joue:
-            action = j1.tire_une_boule(case_obj)  # 1 ou 2
+            action = j1.tire_une_boule(case_obj)
             liste_jeu_j1.append((case_actuelle, action))
             case_actuelle -= action
             dernier_joueur = 1
@@ -154,31 +174,71 @@ def tour(j1: Joueur, j2: Joueur):
 
         joueur1_joue = not joueur1_joue
 
-
-    gagnant = j1 if dernier_joueur == 1 else j2
-    perdant = j2 if dernier_joueur == 1 else j1
-
-
-    # Apprentissage :
-    # - gagnant : on ajoute 1 boule pour chaque action jouée
-    # - perdant : on enlève 1 boule pour chaque action jouée
-    if perdant is j1:
-        # j1 perd, j2 gagne
-        for (etat, action) in liste_jeu_j1:
-            liste_cases[etat].supprimer_boule(action)
-        for (etat, action) in liste_jeu_j2:
-            liste_cases[etat].ajouter_boule(action)
+    if dernier_joueur == 1:
+        coups_gagnant, coups_perdant = liste_jeu_j1, liste_jeu_j2
+        gagnant = j1
     else:
-        # j2 perd, j1 gagne
-        for (etat, action) in liste_jeu_j2:
-            liste_cases[etat].supprimer_boule(action)
-        for (etat, action) in liste_jeu_j1:
-            liste_cases[etat].ajouter_boule(action)
+        coups_gagnant, coups_perdant = liste_jeu_j2, liste_jeu_j1
+        gagnant = j2
+
+    for etat, action in coups_gagnant:
+        liste_cases[etat].ajouter_boule(action)
+    for etat, action in coups_perdant:
+        liste_cases[etat].supprimer_boule(action)
 
     return gagnant
 
 
-for _ in range(1000): #100020 Pour resultat hyper coherent
-    tour(joueur1, joueur2)
-for case in liste_cases[1:]:
-    case.recap()
+def entrainer_ia(liste_cases: list[Case], nb_parties: int):
+    """Fait jouer 2 IA entre elles pour entraîner la stratégie."""
+    joueur1 = Joueur(1)
+    joueur2 = Joueur(2)
+    case_depart = len(liste_cases) - 1
+
+    for _ in range(nb_parties):
+        tour(joueur1, joueur2, liste_cases, case_depart)
+
+
+def afficher_recapitulatif(liste_cases: list[Case]):
+    for case in liste_cases[1:]:
+        case.recap()
+
+
+def sauvegarder_modele(liste_cases: list[Case], chemin_fichier: str):
+    """Sauvegarde les poids de l'IA dans un fichier JSON."""
+    if not liste_cases:
+        return
+
+    data = {
+        "max_retrait": liste_cases[0].max_retrait,
+        "nb_batons": len(liste_cases) - 1,
+        "cases": [case.poids_actions for case in liste_cases],
+    }
+
+    with open(chemin_fichier, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+
+
+def charger_modele(chemin_fichier: str) -> list[Case]:
+    """Charge les poids d'une IA depuis un fichier JSON."""
+    with open(chemin_fichier, "r", encoding="utf-8") as f:
+        data = json.load(f)
+
+    max_retrait = int(data["max_retrait"])
+    cases_data = data["cases"]
+
+    cases = []
+    for numero, poids in enumerate(cases_data):
+        poids_int = {int(action): int(valeur) for action, valeur in poids.items()}
+        cases.append(Case(numero, max_retrait=max_retrait, poids=poids_int))
+    return cases
+
+
+def main():
+    liste_cases = creer_liste_cases(NB_BATONS_DEFAUT, MAX_RETRAIT_DEFAUT)
+    entrainer_ia(liste_cases, nb_parties=1000)
+    afficher_recapitulatif(liste_cases)
+
+
+if __name__ == "__main__":
+    main()
