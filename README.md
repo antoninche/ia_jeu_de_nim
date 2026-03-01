@@ -1,28 +1,91 @@
-# Jeu de Boules – Projet Python / NSI
+# Jeu de Nim – Projet Python / NSI
 
 ## Description
-Ce projet est une simulation d’un jeu de stratégie en Python, développée dans le cadre du programme de Terminale NSI.  
-Le principe du jeu est le suivant : deux joueurs retirent alternativement une ou deux boules d’une pile, et le dernier joueur à retirer une boule gagne la partie.
+Ce projet implémente le jeu de Nim en Python, avec une IA qui apprend par renforcement (méthode des boules/urnes).
 
-Le programme intègre un mécanisme d’apprentissage simple : chaque case conserve une mémoire des coups qui ont conduit à la victoire ou à la défaite et ajuste le nombre de boules disponibles pour chaque action afin d’améliorer le comportement des joueurs IA.
+Tu peux :
+- entraîner l’IA,
+- jouer en console,
+- jouer avec une interface Pygame moderne.
 
----
-
-## Fonctionnalités
-
-- Simulation automatique de parties entre deux joueurs IA
-- Apprentissage par renforcement : les positions gagnantes sont renforcées et les positions perdantes sont pénalisées
-- Répartition dynamique des boules pour chaque case (jaune = action 1, rouge = action 2)
-- Affichage d’un récapitulatif théorique et observé pour chaque case
-- Identification des positions gagnantes et perdantes
+Le principe : on retire de **1 à N bâtons** (N=2 ou 3 selon la règle), et le joueur qui prend le dernier bâton gagne.
 
 ---
 
-## Installation et exécution
+## Fichiers principaux
 
-1. Cloner le dépôt :
+- `ia.py`
+  - Cœur de l’IA (classes `Case`, `Joueur`, entraînement, sauvegarde/chargement JSON).
+- `game_logic.py`
+  - Moteur de partie Nim (état, coups valides, alternance des joueurs).
+- `nim_console.py`
+  - Interface console simple : humain vs humain ou humain vs IA.
+- `nim_pygame.py`
+  - Interface graphique Pygame entièrement revue (layout moderne, lisible, sans chevauchement).
+
+---
+
+## Installation
 
 ```bash
 git clone https://github.com/AntoCheMaestro/ia_jeu_de_nim.git
 cd ia_jeu_de_nim
+```
+
+### Dépendance pour l’interface graphique
+
+```bash
+pip install pygame
+```
+
+---
+
+## Lancer le projet
+
+### 1) Mode IA seul (analyse / debug)
+
+```bash
 python ia.py
+```
+
+### 2) Mode console
+
+```bash
+python nim_console.py
+```
+
+### 3) Mode Pygame
+
+```bash
+python nim_pygame.py
+```
+
+Dans le menu Pygame, tu peux configurer :
+- le mode (`Humain vs Humain`, `Humain vs IA`, `IA vs IA`),
+- la règle (2 ou 3 retraits max),
+- le nombre initial de bâtons,
+- la difficulté IA (`facile`, `moyen`, `difficile`).
+
+En partie, tu peux utiliser les touches :
+- `1`, `2`, `3` pour jouer,
+- `M` pour retourner au menu,
+- `R` pour relancer rapidement,
+- `H` pour afficher/masquer l'aide en jeu.
+
+Les statistiques sont sauvegardées automatiquement dans `stats_nim.json` (réinitialisation possible depuis l'écran stats).
+
+---
+
+## Idées d’amélioration
+
+- Ajouter des animations plus avancées (transitions, effets de victoire).
+- Ajouter une sauvegarde de statistiques sur disque.
+- Enregistrer plusieurs profils IA selon les réglages.
+
+---
+
+### Tests rapides
+
+```bash
+python -m unittest -v
+```
