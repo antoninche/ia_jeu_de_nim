@@ -7,7 +7,7 @@ NOMBRE_BOULES_INIT = 20
 NB_BATONS_DEFAUT = 10
 MAX_RETRAIT_DEFAUT = 2
 
-
+ 
 class Case:
     """État du jeu pour un nombre de bâtons donné."""
 
