@@ -1,3 +1,14 @@
 __pycache__/
 *.pyc
- 
+.venv/
+.DS_Store
+
+# fichiers générés par le jeu
+stats_nim.json
+modele_nim.json
+
+# artefacts de build (PyInstaller)
+build/
+dist/
+*.spec
+assets/*.iconset/
