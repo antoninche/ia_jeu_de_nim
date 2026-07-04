@@ -23,7 +23,7 @@ jobs:
           - os: windows-latest
             label: Windows
             icon: assets/icon.ico
-          - os: macos-13
+          - os: macos-latest
             label: macOS
             icon: assets/icon.icns
     steps:

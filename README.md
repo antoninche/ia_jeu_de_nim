@@ -25,7 +25,7 @@ depuis la [**dernière release**](https://github.com/antoninche/ia_jeu_de_nim/re
 | Système | Fichier | Comment lancer |
 |---|---|---|
 | Windows | `Nim-Windows.zip` | Décompresser, puis double-cliquer sur `Nim.exe`. |
-| macOS | `Nim-macOS.zip` | Décompresser, **clic droit** sur `Nim.app` puis *Ouvrir* (confirmation demandée la première fois, l'app n'étant pas signée). |
+| macOS (Apple Silicon) | `Nim-macOS.zip` | Décompresser, **clic droit** sur `Nim.app` puis *Ouvrir* (confirmation demandée la première fois, l'app n'étant pas signée). |
 
 ---
 
