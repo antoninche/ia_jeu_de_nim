@@ -1,0 +1,86 @@
+name: Release
+
+# Construit l'application pour Windows (.exe) et macOS (.app) puis publie
+# une Release GitHub avec les deux exécutables, à chaque tag « v* ».
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build ${{ matrix.label }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            label: Windows
+            icon: assets/icon.ico
+          - os: macos-13
+            label: macOS
+            icon: assets/icon.icns
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Installer les dépendances
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt pyinstaller
+
+      - name: Construire l'exécutable
+        run: >
+          pyinstaller --noconfirm --windowed --onefile
+          --name Nim --icon ${{ matrix.icon }}
+          --paths sources sources/jeu_nim.py
+
+      - name: Empaqueter (Windows)
+        if: runner.os == 'Windows'
+        run: 7z a Nim-Windows.zip ./dist/Nim.exe
+
+      - name: Empaqueter (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          cd dist
+          zip -r ../Nim-macOS.zip Nim.app
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Nim-${{ matrix.label }}
+          path: Nim-*.zip
+
+  release:
+    name: Publier la Release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Publier
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/**/*.zip
+          generate_release_notes: true
+          body: |
+            ## Nim - Le jeu des bonbons
+
+            Jeu du Nim coloré et éducatif, avec une IA qui apprend toute seule.
+
+            ### Télécharger
+            - **Windows** : `Nim-Windows.zip` -> décompresser -> lancer `Nim.exe`.
+            - **macOS** : `Nim-macOS.zip` -> décompresser -> clic droit sur `Nim.app` -> *Ouvrir*
+              (la première fois, macOS demande une confirmation car l'app n'est pas signée).
+
+            Aucune installation de Python n'est nécessaire.
